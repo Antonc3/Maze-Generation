@@ -1,0 +1,610 @@
+<header>
+  <div width="1000px">
+    <div id="mazegeneration">
+      <input type="file" name="inputfile" id="inputfile"><br><br>
+      <label for="wh">Width and Height</label>
+      <input type="number" class="smallnumbers" id="width" name="wh" value=30>,
+      <input type="number" class="smallnumbers" id="height" name="wh" value=30><br><br>
+      <button id="genmaze">Generate New Random Maze!</button>
+    </div>
+    <div id="moremazegen">
+      <label for="startCoords">Starting Coordinates</label>
+      <input type="number" class="smallnumbers" id="startX" name="startCoords" value="1">,
+      <input type="number" class="smallnumbers" id="startY" name="startCoords" value="1"><br><br>
+      <label for="endCoords">End Coordinates</label>
+      <input type="number" class="smallnumbers" id="endX" name="endCoords" value=30>,
+      <input type="number" class="smallnumbers" id="endY" name="endCoords" value=30>
+    </div>
+    <button type="button" id="solve">Solve the Maze!</button>
+</div>
+</header>
+
+<body>  
+</body> 
+<style>
+  canvas{
+    background: white;
+    margin: 10px;
+  }
+  .smallnumbers{
+    width: 50px;
+  }
+  #mazegeneration{
+    float: left;
+    width: 20%;
+    height: 100px;
+  }
+  #moremazegen{
+    float: left;
+    margin-left: 0%;
+    width: 20%;
+  }
+</style>
+<script src="gen_maze_html.js"></script>
+
+<script>
+  document.getElementById("genmaze").addEventListener("click", genUpload);
+  document.getElementById("solve").addEventListener("click",solveMaze);
+  function generateMaze(){
+    let w = parseInt(document.getElementById("width").value);
+    let h = parseInt(document.getElementById("height").value);
+    let [startX,startY] = [parseInt(document.getElementById("startX").value),parseInt(document.getElementById("startY").value)];
+    let [endX,endY]=[parseInt(document.getElementById("endX").value),parseInt(document.getElementById("endY").value)];
+    var gMaze;
+    try {
+      if(!(Number.isInteger(w) && Number.isInteger(h))){
+        throw new Error('One of the two inputs is not a number');
+      }
+      if(w<=0 || h<=0){
+        throw new Error('One of the two inputs is negative')
+      }
+    }
+    catch(err) {
+      console.log(err);
+    }
+    console.log("startCoord",startX,startY)
+    gMaze = generate(w,h,startX,startY,endX,endY);
+    return gMaze; 
+  }
+  function genUpload(){
+    createMaze2D(generateMaze());
+  }
+  function solveMaze(){
+    m.solveDFS();
+  }
+  document.getElementById('inputfile') 
+      .addEventListener('change', function() {
+      var fr=new FileReader(); 
+      fr.onload=function(){ 
+        createMaze(fr.result);
+      }
+        
+      fr.readAsText(this.files[0]);
+  }) 
+  class pt{
+    constructor(x,y,value){
+      this.x = x;
+      this.y = y;
+      this.value = value;
+    }
+  }
+  class Canvas {
+    constructor(w, h) {
+      [this.w, this.h] = [w, h];
+      this.canvas = document.createElement("canvas");
+      this.canvas.width = this.w;
+      this.canvas.height = this.h;
+
+      document.querySelector('body').append(this.canvas);
+      this.ctx = this.canvas.getContext('2d');
+      this.imageData = this.ctx.getImageData(0, 0, this.w, this.h);
+      this.data = this.imageData.data;
+    }
+    resize(w,h){
+      [this.w,this.h] = [w,h];
+      this.canvas.width = this.w;
+      this.canvas.height = this.h;
+      this.ctx = this.canvas.getContext('2d');
+      this.imageData = this.ctx.getImageData(0, 0, this.w, this.h);
+      this.data = this.imageData.data;
+    }
+    setPixel(x, y, r, g, b, a) {
+      let index = 4 * (y * this.w + x);
+      [this.data[index+0], this.data[index + 1], this.data[index + 2], this.data[index + 3]] = [r, g, b, a];
+    }
+    setPixels() {
+      this.ctx.putImageData(this.imageData, 0, 0);
+    }
+  }
+  class Color {
+    constructor(r,g,b){
+      [this.r,this.g,this.b] = [r,g,b];
+    }
+  }
+  let wallColor = new Color(10,10,10);
+  let wallThick = 5;
+  let wallGap = 20;
+  let w = 11;
+  let h = 11;
+  // let c = new Canvas((wallThick+wallGap)*w,(wallThick+wallGap)*h)
+  let playerColor = new Color(255,0,0);
+  let pGap = 6;
+  let down = false
+  let endColor = new Color(0,255,0);
+  let blankColor = new Color(255,255,255);
+  let visit1Color = new Color(0,0,255);
+  let visit2Color = new Color(50,50,50);
+  document.addEventListener('keydown',function(e){
+    if(down) return;
+    down = true;
+    if(e.key =='w' || e.key =='38'){
+      m.pMoveUp()
+    }
+    if(e.key =='a' || e.key =='37'){
+      m.pMoveLeft()
+    }
+    if(e.key =='s' || e.key =='40'){
+      m.pMoveDown()
+    }
+    if(e.key =='d' || e.key =='39'){
+      m.pMoveRight()
+    }
+    m.update();
+  })
+  document.addEventListener('keyup',function(){
+    down = false;
+  })
+  class Maze {
+    constructor(w,h){
+      [this.pX,this.pY]=[0,0];
+      [this.origPX,this.origPY] = [0,0];
+      [this.eX,this.eY] = [w,h];
+      [this.origEX,this.origEY] = [w,h]
+      [this.w, this.h] = [w,h];
+      this.maze = new Array(h*2+1);
+      this.c = new Canvas((wallThick+wallGap)*w,(wallThick+wallGap)*h)
+      for(let i = 0; i < h*2+1; i++){
+        this.maze[i] = new Array(w*2+1);
+        for(let j = 0; j < w*2+1; j++){
+          this.maze[i][j] = ' ';
+        }
+      }
+    }
+    loadMaze(maze){
+      let arrW = maze.indexOf('\n');
+      let arrH = Math.floor((maze.length)/arrW);
+      this.maze = new Array(arrH);
+      this.origMaze = new Array(arrH)
+      for(let i = 0; i < arrH; i++){
+        this.maze[i] = new Array(arrW);
+        this.origMaze[i] = new Array(arrW);
+        for(let j = 0; j < arrW; j++){
+          this.maze[i][j] = ' ';
+          this.origMaze[i][j] = ' ';
+        }
+      }
+      this.w = (arrW-1)/2;
+      this.h = (arrH-1)/2;
+      this.c.resize((wallThick+wallGap)*(this.w+1),(wallThick+wallGap)*(this.h+1));
+      for(let i = 0; i < arrH; i++){
+        for(let j = 0; j < arrW; j++){
+          if(maze[i][j] == 'p'){
+            [this.pX,this.pY]=[(j-1)/2,(i-1)/2]
+          }
+          this.maze[i][j] = maze[i*(arrH+1)+j];
+          this.origMaze[i][j] = maze[i*(arrH+1)+j];
+        }
+      }
+    }
+    loadMaze2D(maze){
+      let arrW = maze[0].length;
+      let arrH = maze.length;
+      this.trail = new Array();
+      this.solving = false;
+      this.w = (arrW-1)/2;
+      this.h = (arrH-1)/2;
+      this.c.resize((wallThick+wallGap)*(this.w+1),(wallThick+wallGap)*(this.h+1));
+      this.maze = new Array(arrH);
+      this.origMaze = new Array(arrH);
+      for(let i = 0; i < arrH; i++){
+        this.maze[i] = new Array(arrW);
+        this.origMaze[i] = new Array(arrW);
+        for(let j = 0; j < arrW; j++){
+          if(maze[i][j] == 'p'){
+            [this.pX,this.pY]=[(j-1)/2,(i-1)/2];
+            [this.origPX,this.origPY]=[this.pX,this.pY];
+          }
+          if(maze[i][j] == 'f'){
+            [this.eX,this.eY]=[(j-1)/2,(i-1)/2];
+            [this.origEX,this.origEY]=[(j-1)/2,(i-1)/2];
+          }
+          this.maze[i][j] = maze[i][j];
+          this.origMaze[i][j] = maze[i][j];
+        }
+      }
+    }
+    restoreOriginal(){
+      [this.pX,this.pY] = [this.origPX,this.origPY];
+      [this.eX,this.eY] = [this.origEX,this.origEY];
+      for(let i = 0; i < this.maze.length;i++){
+        for(let j = 0; j < this.maze[0].length; j++){
+          this.maze[i][j] = this.origMaze[i][j];
+        }
+      }
+    }
+    makeWall(x1,y1,x2,y2){
+      //check for boundries
+      if (x1!=x2 && y1 != y2 &&x1 >=0 && x1 < w && x2 >= 0 && x2 < w
+        && y1 >= 0 && y1 < h && y2 >= 0 && y2 <= h) return this
+      if(x1 == x2){
+        this.makeVerticalWall(x1,y1,y2);
+        return this;
+      }
+      if(y1==y2){
+        this.makeHorizantalWall(y1,x1,x2);
+      }
+      return this;
+    }
+    makeHorizantalWall(y,x1,x2){
+      if(x1 > x2){
+        [x1,x2] = [x2,x1]
+      }
+      for(let i = x1; i < x2; i++){
+        this.maze[y*2][i*2] = 'w';
+        this.drawWallBlock(i*2,y*2);
+        this.maze[y*2][i*2+1] = 'w';
+        this.drawWallBlock(i*2+1,y*2);
+      }
+      this.maze[y*2][x2*2]= 'w';
+      this.drawWallBlock(x2*2,y*2);
+    }
+    makeVerticalWall(x,y1,y2){
+      if(y1 > y2){
+        [y1,y2] = [y2,y1]
+      }
+      for(let i = y1; i < y2; i++){
+        this.maze[i*2][x*2] = 'w';
+        this.drawWallBlock(x*2,i*2);
+        this.maze[i*2+1][x*2] = 'w';
+        this.drawWallBlock(x*2,i*2+1);
+      }
+      this.drawWallBlock(x*2,y2*2)
+
+      this.maze[y2*2][x*2]= 'w';
+    }
+    drawWallBlock(i,j){
+      let x,y;
+      [x,y] = this.getPos(i,j)
+      if(i%2 == 1){
+        for(let a = x; a < x+wallGap; a++){
+          for(let b = y; b < y+wallThick;b++){
+            this.c.setPixel(a,b,10,10,10,255);
+          }
+        }
+        return;
+      }
+      if(j%2 == 1){
+        for(let a = x; a < x+wallThick; a++){
+          for(let b = y; b < y+wallGap;b++){
+            this.c.setPixel(a,b,10,10,10,255);
+          }
+        }
+        return;
+      }
+      for(let a = x; a < x+wallThick; a++){
+        for(let b = y; b < y+wallThick;b++){
+            this.c.setPixel(a,b,10,10,10,255);
+        }
+      }
+    }
+    getPos(i,j){
+      var x,y;
+      x=Math.floor(i/2)*(wallGap+wallThick);
+      y=Math.floor(j/2)*(wallGap+wallThick);
+
+      if(i%2 == 1){
+        x+=wallThick;
+      }
+      if(j%2==1){
+        y+=wallThick;
+      }
+      return [x,y];
+    }
+    drawMaze(){
+      this.clearCanvas();
+      let [wR,wB,wG] = [wallColor.r,wallColor.g,wallColor.b];
+      for(let i = 0; i < this.maze.length; i++){
+        for(let j = 0; j < this.maze[0].length; j++){
+          if(this.maze[i][j] == 'w'){
+            if(i%2==0 && j%2==0){
+              let [x1,y1] = this.getPos(j,i);
+              for(let x = x1; x < x1+wallThick; x++){
+                for(let y = y1; y < y1+wallThick;y++){
+                  this.c.setPixel(x,y,wR,wB,wG,255);
+                }
+              }
+            }
+            else if(i%2==0){
+              let [x1,y1] = this.getPos(j,i);
+              for(let x = x1; x < x1+wallGap; x++){
+                for(let y = y1; y < y1+wallThick;y++){
+                  this.c.setPixel(x,y,wR,wB,wG,255);
+                }
+              }
+            }
+            else if(j%2==0){
+              let [x1,y1] = this.getPos(j,i);
+              for(let x = x1; x < x1+wallThick; x++){
+                for(let y = y1; y < y1+wallGap;y++){
+                  this.c.setPixel(x,y,wR,wB,wG,255);
+                }
+              }
+            }
+          }
+          if(this.maze[i][j] == 'p'){
+            let [x1,y1] = this.getPos(j,i);
+            for(let x = x1+pGap; x < x1+wallGap-pGap; x++){
+              for(let y = y1+pGap; y < y1+wallGap-pGap;y++){
+                this.c.setPixel(x,y,playerColor.r,playerColor.g,playerColor.b,255);
+              }
+            }
+          }
+          if(this.maze[i][j] == 'f'){
+            let [x1,y1] = this.getPos(j,i);
+            for(let x = x1+pGap; x < x1+wallGap-pGap; x++){
+              for(let y = y1+pGap; y < y1+wallGap-pGap;y++){
+                this.c.setPixel(x,y,endColor.r,endColor.g,endColor.b,255);
+              }
+            }
+          }
+        }
+      }
+      this.update();
+    }
+    printMaze(){
+      for(let i = 0; i < this.h*2+1; i++){
+        let line = '';
+        for(let j = 0; j < this.w*2+1; j++){
+          line += this.maze[i][j];
+        }
+      }
+    }
+    clearCanvas(){
+      for(let i = 0; i < this.c.h; i++){
+        for(let j = 0; j < this.c.w; j++){
+          this.c.setPixel(i,j,255,255,255,255); 
+        }
+      }
+    }
+    //Player Movement
+    pMoveLeft(){
+      if(this.solving){
+        return;
+      }
+      var [x,y] = [this.pX*2+1,this.pY*2+1]
+      if(this.maze[y][x-1] != 'w'){
+        this.eraseCurPlayer(x,y);
+        this.maze[y][x] = ' ';
+        this.maze[y][x-2] = 'p';
+        [this.pX,this.pY] = [(x-3)/2,(y-1)/2]
+        this.drawCurPlayer(x-2,y)
+      }
+    }
+    pMoveUp(){
+      if(this.solving){
+        return;
+      }
+      var [x,y] = [this.pX*2+1,this.pY*2+1]
+      if(this.maze[y-1][x] != 'w'){
+        this.eraseCurPlayer(x,y);
+        this.maze[y][x] = ' ';
+        this.maze[y-2][x] = 'p';
+        [this.pX,this.pY] = [(x-1)/2,(y-3)/2]
+        this.drawCurPlayer(x,y-2)
+      }
+    }
+    pMoveDown(){
+      if(this.solving){
+        return;
+      }
+      var [x,y] = [this.pX*2+1,this.pY*2+1]
+      if(this.maze[y+1][x] != 'w'){
+        this.eraseCurPlayer(x,y);
+        this.maze[y][x] = ' ';
+        this.maze[y+2][x] = 'p';
+        [this.pX,this.pY] = [(x-1)/2,(y+1)/2]
+        this.drawCurPlayer(x,y+2)
+      }
+    }
+    pMoveRight(){
+      if(this.solving){
+        return;
+      }
+      var [x,y] = [this.pX*2+1,this.pY*2+1]
+      if(this.maze[y][x+1] != 'w'){
+        this.eraseCurPlayer(x,y);
+        this.maze[y][x] = ' ';
+        this.maze[y][x+2] = 'p';
+        [this.pX,this.pY] = [(x+1)/2,(y-1)/2]
+        this.drawCurPlayer(x+2,y)
+      }
+    }
+    pMoveTo(x,y,vc){
+      var [x1,y1] = [this.pX*2+1,this.pY*2+1]
+      let cur = vc[y1][x1];
+      if(cur == '2'){
+        this.eraseCurPlayer(x1,y1,visit2Color);
+        this.maze[y1][x1] = '2';
+      }
+      if(cur == '1'){
+        this.eraseCurPlayer(x1,y1,visit1Color);
+        this.maze[y1][x1] = '1';
+      }
+      if(cur == ' '){
+        this.eraseCurPlayer(x1,y1,visit1Color);
+        this.maze[y1][x1] = '1';
+        vc[y1][x1] = '1'
+      }
+      if(cur == 'f'){
+        this.eraseCurPlayer(x1,y1,endColor);
+        this.maze[y1][x1] = 'f';
+      }
+      this.maze[y][x] = 'p';
+      [this.pX,this.pY] = [(x-1)/2,(y-1)/2]
+      this.drawCurPlayer(x,y)
+    }
+    eraseCurPlayer(x,y,color = blankColor){
+      /*this.trail.push(new pt(x,y,new Color(255,255,255)));
+      console.log(this.trail)
+      if(this.trail.length >= 10){
+        let cur = this.trail[0];
+        x = cur.x;
+        y = cur.y;
+        this.trail = [this.trail[1],this.trail[2],this.trail[3],this.trail[4],this.trail[5],this.trail[6],this.trail[7],this.trail[8],this.trail[9]];      
+      }
+      else{
+        return;
+      }*/
+      // color=new Color(255.,255,255);
+      let [aX,aY] = this.getPos(x,y);
+      var [r,g,b] = [color.r,color.g,color.b]
+      if(this.origMaze[y][x] == 'f'){
+        [r,g,b] = [endColor.r,endColor.g,endColor.b];
+      }
+      for(let i = aX+pGap; i < aX+wallGap-pGap; i++){
+        for(let j = aY+pGap; j < aY+wallGap-pGap; j++){
+          this.c.setPixel(i,j,r,g,b,255);
+        }
+      }
+    }
+    drawCurPlayer(x,y){ 
+      let [aX,aY] = this.getPos(x,y);
+      for(let i = aX+pGap; i < aX+wallGap-pGap; i++){
+        for(let j = aY+pGap; j < aY+wallGap-pGap; j++){
+          let [pR,pG,pB] = [playerColor.r,playerColor.g,playerColor.b];
+          this.c.setPixel(i,j,pR,pG,pB,255);
+        }
+      }
+    }
+    solveDFS(){
+      this.solving = true;
+      this.restoreOriginal();
+      var vc = makeCopy(m.origMaze);
+      this.drawMaze();
+      vc[this.pY*2+1][this.pX*2+1] = '1';
+      var self = this;
+      // while(!(this.pX == this.eX && this.pY == this.eY)){
+      //   console.log(this.pX,this.eX,this.pY,this.eY)
+      //   self.solveMazeDFS(vc);
+      // }
+      // console.log('done');
+      self.interval = setInterval(function(){self.solveMazeDFS(vc);},20);
+    }
+    solveMazeDFS(vc){
+      //p is the player
+      //1 is visited once
+      //2 is visited twice
+      console.log('still running');
+      [this.lPX,this.lPY] = [this.pX,this.pY];
+      console.log(this.pX,this.pY,this.eX,this.eY)
+      if(this.pX == this.eX && this.pY == this.eY){
+        console.log("I AM DONE")
+        clearInterval(this.interval);
+        return;
+      }
+      let adj = this.getNearby(this.pX*2+1,this.pY*2+1);
+      var low = undefined;
+      let done = false;
+      if(adj.length == 0){
+        clearInterval(this.interval);
+        alert('I AM STUCK PLS HELP');
+        return;
+      }
+      if(adj.length == 1){
+        vc[this.pY*2+1][this.pX*2+1] = '2';
+      }
+      for(let i = 0; i < adj.length; i++){
+        let cur = adj[i];
+        if(cur.value == 'f'){
+          done = true;
+          this.pMoveTo(cur.x,cur.y,vc);
+          break;
+        }
+        if(cur.value == ' '){
+          done = true;
+          this.pMoveTo(cur.x,cur.y,vc);
+          break;
+        }
+        var [lx,ly] = [this.lPX*2+1,this.lPY*2+1];
+        if(cur.value == '1'){
+          if(cur.x != lx && cur.y != ly) low = cur; 
+          else if(low == undefined) low = cur;
+        }
+      }
+
+      if(!done){
+        this.pMoveTo(low.x,low.y,vc);
+      }
+      this.update();
+    }
+    getNearby(x,y){
+      let adj = new Array();
+      
+      if(this.maze[y][x+1] != 'w' && this.maze[y][x+2] != '2'){
+        if(x<(this.maze[0].length-2)){
+          adj.push(new pt(x+2,y,this.maze[y][x+2]));
+        }
+      }
+      if(this.maze[y-1][x] != 'w' && this.maze[y-2][x] != '2'){
+        if(y>1){
+          adj.push(new pt(x,y-2,this.maze[y-2][x]));
+        }
+      }
+      if(this.maze[y+1][x] != 'w' && this.maze[y+2][x] != '2'){
+        if(y<this.maze.length-2){
+          adj.push(new pt(x,y+2,this.maze[y+2][x]));
+        }
+      }
+
+      if(this.maze[y][x-1] != 'w' && this.maze[y][x-2] != '2'){
+        if(x>1){
+          adj.push(new pt(x-2,y,this.maze[y][x-2]));
+        }
+      } 
+      return adj;
+    }
+    update(){  
+      this.c.setPixels();
+    }
+  }
+  var m = new Maze(w,h);
+  function createMaze(maze){
+    m.loadMaze(maze);
+    m.printMaze();
+    m.drawMaze();
+    console.log("updated");
+  }
+  function createMaze2D(maze){
+    m.loadMaze2D(maze);
+    m.printMaze();
+    m.drawMaze();
+    console.log("updated");
+  }
+  function makeCopy(maze){
+    let newMaze = new Array(maze.length);
+    for(let i =0; i < maze.length; i++){
+      newMaze[i] = new Array(maze[0].length);
+      for(let j = 0; j < maze[0].length; j++){
+        newMaze[i][j] = maze[i][j];
+      }
+    }
+    return newMaze;
+  }
+  function myFunction() {
+    console.log('Hello');
+  }
+  // let maze = new Maze(w,h);
+  // maze.makeWall(0,0,10,0).makeWall(0,0,0,10).makeWall(10,0,10,10).makeWall(0,10,10,10);
+  // maze.update();  
+</script>
+</head>
